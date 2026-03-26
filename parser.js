@@ -24,4 +24,15 @@ async function extractTextFromDOCX(buffer) {
   return result.value;
 }
 
-module.exports = { extractTextFromPDF, extractTextFromDOCX };
+// Extract text from DOC buffer (older Word format)
+async function extractTextFromDOC(buffer) {
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value;
+}
+
+// Extract text from TXT buffer
+async function extractTextFromTXT(buffer) {
+  return buffer.toString('utf8');
+}
+
+module.exports = { extractTextFromPDF, extractTextFromDOCX, extractTextFromDOC, extractTextFromTXT };
