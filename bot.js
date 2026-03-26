@@ -23,6 +23,7 @@ bot.onText(/\/start/, (msg) => {
     `📄 *PDF file* — upload it\n` +
     `📃 *Word file* — upload .docx\n\n` +
     `I will:\n` +
+    `📊 Score your resume out of 10\n` +
     `✅ Give you improvement suggestions\n` +
     `🎨 Return *3 styled PDF resumes*`,
     { parse_mode: 'Markdown' }
@@ -52,7 +53,6 @@ bot.on('document', async (msg) => {
   });
 
   try {
-    // Download file from Telegram servers
     const fileLink = await bot.getFileLink(doc.file_id);
     const response = await axios({ url: fileLink, responseType: 'arraybuffer' });
     const buffer = Buffer.from(response.data);
@@ -75,41 +75,100 @@ bot.on('document', async (msg) => {
   }
 });
 
-// ── Core logic — runs for both text and file ──
+// ── Build score bar (e.g. ████░░░░░░ 7/10) ──
+function scoreBar(score, max = 10) {
+  const filled = Math.round(score);
+  const empty = max - filled;
+  return '█'.repeat(filled) + '░'.repeat(empty) + `  ${score}/${max}`;
+}
+
+// ── Build score emoji based on value ──
+function scoreEmoji(score) {
+  if (score >= 9) return '🌟';
+  if (score >= 7) return '✅';
+  if (score >= 5) return '⚠️';
+  return '❌';
+}
+
+// ── Format the full score message ──
+function buildScoreMessage(score) {
+  const { overall, breakdown, strengths, improvements } = score;
+
+  const overallEmoji = scoreEmoji(overall);
+  const stars = '⭐'.repeat(Math.round(overall / 2));
+
+  let msg = `${overallEmoji} *Resume Score: ${overall}/10*\n`;
+  msg += `${stars}\n\n`;
+
+  msg += `📊 *Score Breakdown:*\n`;
+  msg += `┌─────────────────────────────\n`;
+
+  const labels = {
+    content:      '📝 Content    ',
+    impact:       '💥 Impact     ',
+    skills:       '🛠 Skills     ',
+    formatting:   '🎨 Formatting ',
+    completeness: '📋 Complete   ',
+  };
+
+  for (const [key, label] of Object.entries(labels)) {
+    const item = breakdown[key];
+    if (!item) continue;
+    msg += `│ ${label} ${scoreBar(item.score)}\n`;
+    msg += `│   └ ${item.comment}\n`;
+  }
+  msg += `└─────────────────────────────\n\n`;
+
+  if (strengths?.length) {
+    msg += `💪 *What's Working:*\n`;
+    strengths.forEach((s, i) => {
+      msg += `${i + 1}. ${s}\n`;
+    });
+    msg += `\n`;
+  }
+
+  if (improvements?.length) {
+    msg += `🔧 *What to Improve:*\n`;
+    improvements.forEach((imp, i) => {
+      msg += `${i + 1}. ${imp}\n`;
+    });
+  }
+
+  return msg;
+}
+
+// ── Core logic ──
 async function handleResume(chatId, rawText) {
-  await bot.sendMessage(chatId, '🤖 Analyzing your resume with Gemini AI...\n⏳ Please wait 10–20 seconds.');
+  await bot.sendMessage(chatId, '🤖 Analyzing your resume with AI...\n⏳ Please wait 10–20 seconds.');
 
   try {
     const result = await processResume(rawText);
-    const { resume, tips } = result;
+    const { resume, score } = result;
 
-    // Send improvement tips first
-    const tipText =
-      `✅ *Improvement Suggestions:*\n\n` +
-      tips.map((t, i) => `${i + 1}. ${t}`).join('\n');
-    await bot.sendMessage(chatId, tipText, { parse_mode: 'Markdown' });
+    // ── 1. Send Score Report ──
+    if (score) {
+      const scoreMsg = buildScoreMessage(score);
+      await bot.sendMessage(chatId, scoreMsg, { parse_mode: 'Markdown' });
+    }
 
+    // ── 2. Generate PDFs ──
     await bot.sendMessage(chatId, '🎨 Generating 3 resume templates...');
 
-    // Unique filenames per user to avoid conflicts
     const pathA = `resume_classic_${chatId}.pdf`;
     const pathB = `resume_modern_${chatId}.pdf`;
     const pathC = `resume_creative_${chatId}.pdf`;
 
-    // Generate all 3 PDFs
     await generateTemplateA(resume, pathA);
     await generateTemplateB(resume, pathB);
     await generateTemplateC(resume, pathC);
 
-    // Send all 3 PDFs back
     await bot.sendDocument(chatId, pathA, {}, { filename: 'Resume_Classic.pdf',   caption: '🗂 Template A — Classic' });
     await bot.sendDocument(chatId, pathB, {}, { filename: 'Resume_Modern.pdf',    caption: '✨ Template B — Modern Blue' });
-    await bot.sendDocument(chatId, pathC, {}, { filename: 'Resume_Creative.pdf',  caption: '🎨 Template C — Creative Green' });
+    await bot.sendDocument(chatId, pathC, {}, { filename: 'Resume_Creative.pdf',  caption: '🎨 Template C — Creative Dark' });
 
-    // Cleanup temp files
     [pathA, pathB, pathC].forEach((p) => fs.unlink(p, () => {}));
 
-    await bot.sendMessage(chatId, '✅ Done! Download any template you like. Send another resume anytime.');
+    await bot.sendMessage(chatId, '✅ Done! Send another resume anytime to get a new score and templates.');
 
   } catch (err) {
     console.error('Resume processing error:', err.message);
